@@ -66,13 +66,24 @@ parser.add_argument('--epochs',required=False,type=int,
 
 parser.add_argument('--num_lr_decays', type=int, default=5, metavar='N', help='Number of learning rate decays.')
 
-
+parser.add_argument('--train_dict', required=True, type=str, 
+                    help='JSON file indicating training data')
+parser.add_argument('--valid_dict', required=True, type=str, 
+                    help='JSON file indicating validation data')
+#parser.add_argument('--test_dict',  required=True, type=str, 
+#                    help='JSON file indicating training data')
+parser.add_argument('--model_dir', type=str, default="./", 
+                    help="Directory for model")
 
 args = parser.parse_args()
 
-TRAIN_DICT="/home/aab10867zc/work/aist/pspicker/metadata/pspicker_meta_train_2019-07-17.json"
-VALIDATION_DICT="/home/aab10867zc/work/aist/pspicker/metadata/pspicker_meta_validation_2019-07-19.json"
-MODEL_DIR="/home/aab10867zc/work/aist/pspicker/training_plan"
+#TRAIN_DICT="/home/aab10867zc/work/aist/pspicker/metadata/pspicker_meta_train_2019-07-17.json"
+#VALIDATION_DICT="/home/aab10867zc/work/aist/pspicker/metadata/pspicker_meta_validation_2019-07-19.json"
+#MODEL_DIR="/home/aab10867zc/work/aist/pspicker/training_plan"
+TRAIN_DICT      = args.train_dict
+VALIDATION_DICT = args.valid_dict
+MODEL_DIR       = args.model_dir
+
 
 print("TRAIN_DICT: ", TRAIN_DICT)
 print("VALIDATION_DICT: ", VALIDATION_DICT)
