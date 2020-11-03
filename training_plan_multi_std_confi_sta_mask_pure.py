@@ -1,8 +1,9 @@
 import sys
-sys.path.append("/home/aab10867zc/work/aist/pspicker/code")
+#sys.path.append("/home/aab10867zc/work/aist/pspicker/code")
 import config
 import utils
-import model_multi_confidence_sta_mask_pure as model
+#import model_multi_confidence_sta_mask_pure as model
+import pspicker.model_multi_confidence_sta_mask_pure_original as model
 import pandas as pd
 import numpy as np
 from obspy import Trace,Stream
@@ -54,7 +55,7 @@ parser.add_argument('--train_steps',required=False,type=int,
                     default=1000,
                     metavar="<steps per epoch>",
                     help='Number of training steps per epoch.(default=1000)')
-parser.add_argument('--val_stpes',required=False,type=int,
+parser.add_argument('--val_steps',required=False,type=int,
                     default=300,
                     metavar="<validtion steps>",
                     help='Number of validation steps to run at the end of every training epoch. (default=300)')
@@ -70,10 +71,15 @@ parser.add_argument('--train_dict', required=True, type=str,
                     help='JSON file indicating training data')
 parser.add_argument('--valid_dict', required=True, type=str, 
                     help='JSON file indicating validation data')
-#parser.add_argument('--test_dict',  required=True, type=str, 
-#                    help='JSON file indicating training data')
 parser.add_argument('--model_dir', type=str, default="./", 
                     help="Directory for model")
+#
+parser.add_argument('--num_stations', type=int, default=10, 
+                    help="Number of stations")
+parser.add_argument('--npts', type=int, default=12000, 
+                    help="Data length (number of samples)")
+parser.add_argument('--num_components', type=int, default=3, 
+                    help="Number of components")
 
 args = parser.parse_args()
 
@@ -84,6 +90,8 @@ TRAIN_DICT      = args.train_dict
 VALIDATION_DICT = args.valid_dict
 MODEL_DIR       = args.model_dir
 
+## args.npts must be a multiple of 64 (2^6).
+args.npts = args.npts - np.mod(args.npts, -64)
 
 print("TRAIN_DICT: ", TRAIN_DICT)
 print("VALIDATION_DICT: ", VALIDATION_DICT)
@@ -97,20 +105,25 @@ def main():
         validation_dict=json.load(f)
 
 
+    shape = [args.num_stations, args.npts, args.num_components]
+        
     psconfig=PSConfig()
+    psconfig.WINDOW_TIME_DIM = args.npts
+    psconfig.WINDOW_SHAPE = shape
+    #psconfig.WINDOWS_PER_GPU = 2
     psconfig.display()
-
+    
     train_dataset=PSpickerDataset()
-    train_dataset.load_sac(train_dict,[10,12000,3],add_sub=False)
+    train_dataset.load_sac(train_dict,shape=shape,add_sub=False)
     train_dataset.prepare()
 
 
     validation_dataset=PSpickerDataset()
-    validation_dataset.load_sac(validation_dict,[10,12000,3],add_sub=False)
+    validation_dataset.load_sac(validation_dict,shape=shape,add_sub=False)
     validation_dataset.prepare()
 
 
-            # Data generators
+    # Data generators
     train_generator = model.data_generator(train_dataset, psconfig, shuffle=True,
                                          batch_size=psconfig.BATCH_SIZE)
     val_generator = model.data_generator(validation_dataset, psconfig, shuffle=True,
@@ -159,7 +172,8 @@ def main():
         csv_logger = keras.callbacks.CSVLogger(make_path(stage_train_dir, 'training.csv'), append=True)
         early_stopping = keras.callbacks.EarlyStopping(monitor='val_loss', patience=args.patience)
 
-        psmodel.train(train_generator,val_generator,lr,ckpt_epoch + 1,args.epochs,custom_callbacks=[csv_logger,early_stopping])
+        psmodel.train(train_generator, val_generator, lr, ckpt_epoch + 1, args.epochs, 
+                      custom_callbacks=[csv_logger, early_stopping])
 
         best_ckpt_path, *_ = find_best_checkpoint(stage_train_dir)
         print('=> The end of the stage. Start evaluation on test set using checkpoint "{}".'.format(best_ckpt_path))
@@ -226,6 +240,8 @@ class MaskRCNN_refined(model.MaskRCNN):
         else:
             workers = multiprocessing.cpu_count()
 
+        workers = 40
+        print("fit_generator")
         self.keras_model.fit_generator(
             train_generator,
             initial_epoch=initial_epoch,
@@ -236,9 +252,9 @@ class MaskRCNN_refined(model.MaskRCNN):
             validation_steps=self.config.VALIDATION_STEPS,
             max_queue_size=100,
             workers=workers,
-            use_multiprocessing=True,
+            use_multiprocessing=True
         )
-
+        print("fit_generator done.")
 
     def set_log_dir(self, model_path=None):
         """Sets the model log directory and epoch counter.
@@ -304,7 +320,6 @@ class PSpickerDataset(model.Dataset):
         len_dataset=len(sac_info["windows"])
         for window_id,main_event in enumerate(sac_info["windows"]):
 
-
             sub_event=sac_info["windows"][random.choice([sub_id for sub_id in range(len_dataset) if sub_id!=window_id])]
 
             if add_sub:
@@ -345,7 +360,8 @@ class PSpickerDataset(model.Dataset):
         streams=[]
 
         for event in info["path"]:
-            paths=list(event.values())
+            #paths=list(event.values())
+            paths=list(event)
             traces=[]
             for path in paths:
                 trace=read(path)[0]
@@ -386,7 +402,11 @@ class PSpickerDataset(model.Dataset):
             for trace in stream:
                 channel=channel_dict[trace.stats.channel]
                 npts=min(trace.stats.npts,shape[1])
-                window[station,:npts,channel]=trace.data
+                if npts >= len(trace.data):
+                    window[station,:npts,channel] = trace.data.astype(np.float32)
+                else: 
+                    window[station,:    ,channel] = trace.data[:npts].astype(np.float32)
+                #print(type(window[station,0,channel]))
 
         if self.shuffle:
             random.seed(window_id)
@@ -494,7 +514,7 @@ class PSConfig(config.Config):
 
     STEPS_PER_EPOCH=args.train_steps
 
-    VALIDATION_STEPS=args.val_stpes
+    VALIDATION_STEPS=args.val_steps
 
     DROP_RATE=args.dropout
 
@@ -504,7 +524,8 @@ class PSConfig(config.Config):
 
     DIVISION_SIZE=1028
 
-    WINDOW_STATION_DIM = 10
+    #WINDOW_STATION_DIM = 10
+    WINDOW_STATION_DIM = args.num_stations
 
     RPN_NMS_THRESHOLD = 0.7
 
