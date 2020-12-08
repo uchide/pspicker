@@ -808,13 +808,19 @@ class MaskRCNN():
             log("window_metas", window_metas)
             log("anchors", anchors)
         # Run object detection
-        detections, _, _, mrcnn_match,mrcnn_mask, _, _, _ =\
+        detections, _, _, mrcnn_match, mrcnn_mask, _, _, _ =\
             self.keras_model.predict([molded_windows, window_metas, anchors,stations], verbose=0)
+        
+        print("detections.shape = {}".format(detections.shape))
+        print("detections[0,;,2] = {}".format(detections[0,:,2]))
+        print("mrcnn_match.shape = {}".format(mrcnn_match.shape))
+        print("mrcnn_match[0].shape = {}".format(mrcnn_match[0].shape))
         # Process detections
         results = []
         for i, window in enumerate(windows):
-            final_rois, final_class_ids, final_scores, final_masks,final_match_ids,final_match_scores=\
-                self.unmold_detections(detections[i], mrcnn_match[i] ,mrcnn_mask[i],
+            final_rois, final_class_ids, final_scores, \
+            final_masks, final_match_ids, final_match_scores = \
+                self.unmold_detections(detections[i], mrcnn_match[i], mrcnn_mask[i],
                                        window.shape, molded_windows[i].shape,
                                        real_windows[i])
             results.append({
@@ -866,8 +872,8 @@ class MaskRCNN():
         return molded_windows, window_metas, real_windows
 
 
-    def unmold_detections(self, detections, mrcnn_match,mrcnn_mask, original_window_shape,
-                          window_shape, real_window):
+    def unmold_detections(self, detections, mrcnn_match, mrcnn_mask, 
+                          original_window_shape, window_shape, real_window):
         """Reformats the detections of one image from the format of the neural
         network output to a format suitable for use in the rest of the
         application.
@@ -887,7 +893,9 @@ class MaskRCNN():
         # Detections array is padded with zeros. Find the first class_id == 0.
         zero_ix = np.where(detections[:, 2] == 0)[0]
         N = zero_ix[0] if zero_ix.shape[0] > 0 else detections.shape[0]
-
+        if N == 0:
+            return None, None, None, None, None, None
+        
         # Extract boxes, class_ids, scores, and class-specific masks
         boxes = detections[:N, :2]
         class_ids = detections[:N, 2].astype(np.int32)
@@ -895,9 +903,13 @@ class MaskRCNN():
 
         matches = mrcnn_match[:N,:,:]
         masks = mrcnn_mask[np.arange(N), :, :, class_ids]
-
-        match_ids = np.reshape(np.argmax(matches, axis=2),(matches.shape[0],-1))
-        match_scores = np.reshape(np.max(matches,axis=2),(matches.shape[0],-1))
+        
+        print("N = {}".format(N))
+        print("np.argmax(matches, axis=2).shape = {}".
+              format(np.argmax(matches, axis=2).shape))
+        print("matches.shape = {}".format(matches.shape))
+        match_ids = np.reshape(np.argmax(matches, axis=2), (matches.shape[0], -1))
+        match_scores = np.reshape(np.max(matches, axis=2), (matches.shape[0], -1))
 
         # Translate normalized coordinates in the resized image to pixel
         # coordinates in the original image before resizing
@@ -931,10 +943,13 @@ class MaskRCNN():
             # Convert neural network mask to full size mask
             x1,x2=np.split(boxes,2,axis=1)
             yx1=np.pad(x1,[[0,0],[1,0]],mode="constant")
-            yx2=np.pad(x2,[[0,0],[1,0]],mode="constant",constant_values=self.config.WINDOW_STATION_DIM)
+            yx2=np.pad(x2,[[0,0],[1,0]],
+                       mode="constant", 
+                       constant_values=self.config.WINDOW_STATION_DIM)
             boxes_pad=np.concatenate([yx1,yx2],axis=1)
 
-            full_mask = utils.unmold_mask(masks[i], boxes_pad[i], original_window_shape)
+            full_mask = utils.unmold_mask(masks[i], boxes_pad[i], 
+                                          original_window_shape)
             full_masks.append(full_mask)
         full_masks = np.stack(full_masks, axis=-1)\
         if full_masks else np.empty(original_window_shape[:2] + (0,))

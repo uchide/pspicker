@@ -2,9 +2,11 @@ import sys
 #sys.path.append("/home/aab10867zc/work/aist/pspicker/code")
 #import config
 from pspicker import config
+#import pspicker.utils
 #import utils
 #import model_multi_confidence_sta_mask_pure as model
-import pspicker.model_multi_confidence_sta_mask_pure_original as model
+#import pspicker.model_multi_confidence_sta_mask_pure_original as model
+from pspicker import model 
 #import pspicker.model as model
 import pandas as pd
 import numpy as np
@@ -76,8 +78,8 @@ parser.add_argument('--valid_dict', required=True, type=str,
 parser.add_argument('--model_dir', type=str, default="./", 
                     help="Directory for model")
 #
-parser.add_argument('--num_stations', type=int, default=10, 
-                    help="Number of stations")
+#parser.add_argument('--num_stations', type=int, default=10, 
+#                    help="Number of stations")
 parser.add_argument('--npts', type=int, default=12000, 
                     help="Data length (number of samples)")
 parser.add_argument('--num_components', type=int, default=3, 
@@ -107,7 +109,8 @@ def main():
         validation_dict=json.load(f)
 
 
-    shape = [args.num_stations, args.npts, args.num_components]
+    #shape = [args.num_stations, args.npts, args.num_components]
+    shape = [1, args.npts, args.num_components]
         
     psconfig=PSConfig()
     psconfig.WINDOW_TIME_DIM = args.npts
@@ -303,10 +306,6 @@ class PSpickerDataset(model.Dataset):
     """Generates the pspicker synthetic dataset. The dataset consists of
     seismic waveform windows of shape (stations,time_width,channels).
     """
-
-    #def __init__(self, shuffle=False):
-        #super().__init__()
-        #self.shuffle = shuffle
     
     def load_sac(self, sac_info,shape=[10,12000,3],add_sub=True):
         """Load a subset of the pspicker dataset.
@@ -415,10 +414,10 @@ class PSpickerDataset(model.Dataset):
                     window[station,:    ,channel] = trace.data[:npts].astype(np.float32)
                 #print(type(window[station,0,channel]))
 
-        if self.shuffle:
-            random.seed(window_id)
-            random_index=random.sample(range(shape[0]),shape[0])
-            window=window[random_index]
+        # if self.shuffle:
+        #     random.seed(window_id)
+        #     random_index=random.sample(range(shape[0]),shape[0])
+        #    window=window[random_index]
 
         return window
 
@@ -466,38 +465,41 @@ class PSpickerDataset(model.Dataset):
 
         class_ids = np.ones([count])
 
-        if self.shuffle:
-            random.seed(window_id)
-            random_index=random.sample(range(shape[0]),shape[0])
-            mask[:,:,0]=mask[:,:,0][random_index]
-            main_match=main_match[random_index]
-            streams=[streams[i] for i in random_index]
+        # if self.shuffle:
+        #     random.seed(window_id)
+        #     random_index=random.sample(range(shape[0]),shape[0])
+        #     mask[:,:,0]=mask[:,:,0][random_index]
+        #     main_match=main_match[random_index]
+        #     streams=[streams[i] for i in random_index]
+        #
+        #     if count==2:
+        #         mask[:,:,1]=mask[:,:,1][random_index]
+        #         sub_match=sub_match[random_index]
 
-            if count==2:
-                mask[:,:,1]=mask[:,:,1][random_index]
-                sub_match=sub_match[random_index]
-
-        if count==2:
-            match=np.concatenate((np.expand_dims(main_match,axis=0),np.expand_dims(sub_match,axis=0)),axis=0)
-        elif count==1:
-            match=np.expand_dims(main_match,axis=0)
-
-
-
-        identity=np.zeros([shape[0],shape[0],1])
-        main_ids=np.where(main_match)[0]
-        sub_ids=np.where(sub_match)[0]
-
-        identity[main_ids]=np.expand_dims(main_match,axis=1)
-        identity[sub_ids]=np.expand_dims(sub_match,axis=1)
-
-        station=np.zeros([shape[0],shape[0],2])
-        for i,j in itertools.product(range(shape[0]),range(shape[0])):
-            station[i,j]=[streams[j][0].stats.sac["stla"]/streams[i][0].stats.sac["stla"],streams[j][0].stats.sac["stlo"]/streams[i][0].stats.sac["stlo"]]
+        #if count == 2:
+        #    match = np.concatenate((np.expand_dims(main_match, axis=0),
+        #                            np.expand_dims(sub_match,  axis=0)),
+        #                           axis=0)
+        #elif count == 1:
+        #    match = np.expand_dims(main_match, axis=0)
 
 
-        return mask.astype(np.bool), class_ids.astype(np.int32),match.astype(np.int32),station.astype(np.float32),identity.astype(np.int32)
 
+        #identity=np.zeros([shape[0],shape[0],1])
+        #main_ids=np.where(main_match)[0]
+        #sub_ids=np.where(sub_match)[0]
+
+        #identity[main_ids]=np.expand_dims(main_match,axis=1)
+        #identity[sub_ids]=np.expand_dims(sub_match,axis=1)
+
+        #station=np.zeros([shape[0],shape[0],2])
+        #for i,j in itertools.product(range(shape[0]),range(shape[0])):
+        #    station[i,j]=[streams[j][0].stats.sac["stla"] / streams[i][0].stats.sac["stla"],
+        #                  streams[j][0].stats.sac["stlo"] / streams[i][0].stats.sac["stlo"]]
+
+        #return mask.astype(np.bool), class_ids.astype(np.int32), match.astype(np.int32), \
+        #        station.astype(np.float32), identity.astype(np.int32)
+        return mask.astype(np.bool), class_ids.astype(np.int32)
 
 
 class PSConfig(config.Config):
@@ -505,54 +507,69 @@ class PSConfig(config.Config):
     Derives from the base Config class and overrides values specific
     to the COCO dataset.
     """
-    # Give the configuration a recognizable name
-    NAME = "pspicker"
+#     # Give the configuration a recognizable name
+#     NAME = "pspicker"
 
-    # We use a GPU with 12GB memory, which can fit two images.
-    # Adjust down if you use a smaller GPU.
-    WINDOWS_PER_GPU = args.windows_per_gpu
+#     # We use a GPU with 12GB memory, which can fit two images.
+#     # Adjust down if you use a smaller GPU.
+#     WINDOWS_PER_GPU = args.windows_per_gpu
 
-    # Uncomment to train on 8 GPUs (default is 1)
-    # GPU_COUNT = 8
+#     # Uncomment to train on 8 GPUs (default is 1)
+#     # GPU_COUNT = 8
 
-    GPU_COUNT=args.num_gpu
+#     GPU_COUNT=args.num_gpu
 
-    LEARNING_RATE=args.lr
+#     LEARNING_RATE=args.lr
 
-    STEPS_PER_EPOCH=args.train_steps
+#     STEPS_PER_EPOCH=args.train_steps
 
-    VALIDATION_STEPS=args.val_steps
+#     VALIDATION_STEPS=args.val_steps
 
-    DROP_RATE=args.dropout
+#     DROP_RATE=args.dropout
 
-    #WINDOW_STATION_DIM = 10
-    WINDOW_STATION_DIM = args.num_stations
+#     #WINDOW_STATION_DIM = 10
+#     WINDOW_STATION_DIM = args.num_stations
     
-    RPN_ANCHOR_RATIOS=[0.5,1,1.5,2]
+#     RPN_ANCHOR_RATIOS=[0.5,1,1.5,2]
 
-    DIVISION_SIZE=1028
+#     DIVISION_SIZE=1028
 
-    RPN_NMS_THRESHOLD = 0.7
+#     RPN_NMS_THRESHOLD = 0.7
 
-    FPN_CLASSIF_FC_LAYERS_SIZE = 1024
-    if WINDOW_STATION_DIM == 1:
-        RPN_ANCHOR_SCALES = [64, 128, 256, 512, 1024]
-        CONV_STATION=False
-        POOL_SIZE = [WINDOW_STATION_DIM,14]
-        MASK_POOL_SIZE = [WINDOW_STATION_DIM,28]
-        MASK_SHAPE = [WINDOW_STATION_DIM,56]
-    else:
-        RPN_ANCHOR_SCALES = [1524, 2436, 3648, 4860, 6072]
-        POOL_SIZE = [WINDOW_STATION_DIM,14]
-        MASK_POOL_SIZE = [WINDOW_STATION_DIM,28]
-        MASK_SHAPE = [WINDOW_STATION_DIM,56]
+#     FPN_CLASSIF_FC_LAYERS_SIZE = 1024
+#     if WINDOW_STATION_DIM == 1:
+#         RPN_ANCHOR_SCALES = [64, 128, 256, 512, 1024]
+#         CONV_STATION=False
+#         POOL_SIZE = [WINDOW_STATION_DIM,14]
+#         MASK_POOL_SIZE = [WINDOW_STATION_DIM,28]
+#         MASK_SHAPE = [WINDOW_STATION_DIM,56]
+#     else:
+#         RPN_ANCHOR_SCALES = [1524, 2436, 3648, 4860, 6072]
+#         POOL_SIZE = [WINDOW_STATION_DIM,14]
+#         MASK_POOL_SIZE = [WINDOW_STATION_DIM,28]
+#         MASK_SHAPE = [WINDOW_STATION_DIM,56]
 
-    BACKBONE_CONV=False
-    RPN_CONV=False
-    MRCNN_CONV=False
-    MASK_CONV=False
+#     BACKBONE_CONV=False
+#     RPN_CONV=False
+#     MRCNN_CONV=False
+#     MASK_CONV=False
 
+    NAME="pspicker"
+    GPU_COUNT = 4
+    WINDOWS_PER_GPU = 8
+    DETECTION_MIN_CONFIDENCE=0
+    RPN_ANCHOR_SCALES=[64, 128, 256, 512, 1024]
+
+    RPN_ANCHOR_RATIOS=[0.5,1,2]
+
+    DIVISION_SIZE=1024
+
+    WINDOW_STATION_DIM = 1
     
+    DETECTION_NMS_THRESHOLD=0.01
+    
+    DETECTION_MIN_CONFIDENCE=0.7
+    CONV_STATION=False
     
 if __name__ == '__main__':
     main()
