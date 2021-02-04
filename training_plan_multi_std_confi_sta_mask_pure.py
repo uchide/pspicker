@@ -9,6 +9,7 @@ import pspicker.model_multi_confidence_sta_mask_pure_original as model
 import pandas as pd
 import numpy as np
 from obspy import Trace,Stream
+from obspy.geodetics.base import gps2dist_azimuth
 import matplotlib.pyplot as plt
 from obspy.core import read
 from glob import glob
@@ -28,25 +29,27 @@ import itertools
 parser = argparse.ArgumentParser(
     description='Train Mask R-CNN on PS picker.')
 
-parser.add_argument('--log_dir', default=None,required=False,
+parser.add_argument('--log_dir', default=None, required=False,
                     metavar="<log dir>",
                     help='Use this log dir instead create a new one.')
-parser.add_argument("--num_gpu",default=4,required=False,type=int,
+parser.add_argument("--num_gpu", default=4, required=False, type=int,
                     metavar="<gpu count>",
                     help="Number of GPUs to use.(default=4)")
-parser.add_argument('--lr', default=0.01,required=False,type=float,
+parser.add_argument('--lr', default=0.01, required=False, type=float,
                     metavar="<learning rate>",
                     help='Learning rate.(default=0.01)')
 
+parser.add_argument('--lr_decay', type=float, default=0.2, metavar='DC', 
+                    help='Learning rate decay rate.')
 
-parser.add_argument('--lr_decay', type=float, default=0.2, metavar='DC', help='Learning rate decay rate.')
+parser.add_argument('--dropout', type=float, default=0.5, metavar='DO', 
+                    help='Dropout rate.')
 
-parser.add_argument('--dropout', type=float, default=0.5, metavar='DO', help='Dropout rate.')
+parser.add_argument('--initial_stage', type=int, default=0, metavar='N', 
+                    help='Stage to start training.')
 
-
-parser.add_argument('--initial_stage', type=int, default=0, metavar='N', help='Stage to start training.')
-
-parser.add_argument('--patience', type=int, default=2, metavar='N', help='Stop training stage after #patiences.')
+parser.add_argument('--patience', type=int, default=2, metavar='N', 
+                    help='Stop training stage after #patiences.')
 
 parser.add_argument('--windows_per_gpu',required=False,type=int,
                     default=2,
@@ -67,7 +70,8 @@ parser.add_argument('--epochs',required=False,type=int,
                     metavar="<epochs>",
                     help='Number of training epochs. (default=100)')
 
-parser.add_argument('--num_lr_decays', type=int, default=5, metavar='N', help='Number of learning rate decays.')
+parser.add_argument('--num_lr_decays', type=int, default=5, metavar='N', 
+                    help='Number of learning rate decays.')
 
 parser.add_argument('--train_dict', required=True, type=str, 
                     help='JSON file indicating training data')
@@ -95,15 +99,15 @@ MODEL_DIR       = args.model_dir
 ## args.npts must be a multiple of 64 (2^6).
 args.npts = args.npts - np.mod(args.npts, -64)
 
-print("TRAIN_DICT: ", TRAIN_DICT)
-print("VALIDATION_DICT: ", VALIDATION_DICT)
-print("MODEL_DIR: ",MODEL_DIR)
+print("TRAIN_DICT     : {}".format(args.train_dict))
+print("VALIDATION_DICT: {}".format(args.valid_dict))
+print("MODEL_DIR      : {}".format(args.model_dir))
 
 def main():
 
-    with open(TRAIN_DICT)as f:
+    with open(args.train_dict)as f:
         train_dict=json.load(f)
-    with open(VALIDATION_DICT)as f:
+    with open(args.valid_dict)as f:
         validation_dict=json.load(f)
 
 
@@ -135,7 +139,7 @@ def main():
     if args.log_dir:
         log_dir=args.log_dir
     else:
-        log_dir = os.path.join(MODEL_DIR, 
+        log_dir = os.path.join(args.model_dir, 
                                "{}{:%Y%m%dT%H%M%S}".format(psconfig.NAME.lower(), now))
         os.makedirs(log_dir, exist_ok=True)
 
@@ -161,9 +165,11 @@ def main():
         if ckpt_path is None:
             ckpt_path, ckpt_epoch, ckpt_val_loss = find_best_checkpoint(*previous_stage_train_dirs[-1:])
 
-        print('\n=> Start training stage {}: lr={}, train_dir={}'.format(stage, lr, stage_train_dir))
+        print('\n=> Start training stage {}: lr={}, train_dir={}'
+              .format(stage, lr, stage_train_dir))
         if ckpt_path:
-            print('=> Found a trained model: epoch={}, val_loss={}, path={}'.format(ckpt_epoch, ckpt_val_loss, ckpt_path))
+            print('=> Found a trained model: epoch={}, val_loss={}, path={}'
+                  .format(ckpt_epoch, ckpt_val_loss, ckpt_path))
         else:
             print('=> No trained model found.')
 
@@ -178,14 +184,15 @@ def main():
                       custom_callbacks=[csv_logger, early_stopping])
 
         best_ckpt_path, *_ = find_best_checkpoint(stage_train_dir)
-        print('=> The end of the stage. Start evaluation on test set using checkpoint "{}".'.format(best_ckpt_path))
+        print('=> The end of the stage. Start evaluation on test set using checkpoint "{}".'
+              .format(best_ckpt_path))
     print('\n=> Done.\n')
 
 class MaskRCNN_refined(model.MaskRCNN):
 
 
-    def train(self, train_generator, val_generator, learning_rate, initial_epoch,epochs,
-              custom_callbacks=None):
+    def train(self, train_generator, val_generator, learning_rate, 
+              initial_epoch, epochs, custom_callbacks=None):
         """Train the model.
         train_dataset, val_dataset: Training and validation Dataset objects.
         learning_rate: The learning rate to train with
@@ -220,9 +227,12 @@ class MaskRCNN_refined(model.MaskRCNN):
         # Callbacks
         callbacks = [
             keras.callbacks.TensorBoard(log_dir=self.log_dir,
-                                        histogram_freq=0, write_graph=True, write_images=False),
-            keras.callbacks.ModelCheckpoint(os.path.join(self.log_dir, "ckpt-e{epoch:03d}-l{val_loss:.4f}.h5"),
-                                            verbose=0, save_weights_only=True,save_best_only=True),
+                                        histogram_freq=0, write_graph=True, 
+                                        write_images=False),
+            keras.callbacks.ModelCheckpoint(os.path.join(self.log_dir, 
+                                                         "ckpt-e{epoch:03d}-l{val_loss:.4f}.h5"),
+                                            verbose=0, save_weights_only=True, 
+                                            save_best_only=True),
         ]
 
         # Add custom callbacks to the list
@@ -326,20 +336,24 @@ class PSpickerDataset(model.Dataset):
         len_dataset=len(sac_info["windows"])
         for window_id,main_event in enumerate(sac_info["windows"]):
 
-            sub_event=sac_info["windows"][random.choice([sub_id for sub_id in range(len_dataset) if sub_id!=window_id])]
+            sub_event=sac_info["windows"][random.choice([sub_id for sub_id in range(len_dataset) 
+                                                         if sub_id != window_id])]
 
             if add_sub:
                 num_main_event_least=shape[0]//2
             else:
                 num_main_event_least=shape[0]
 
-            num_main_event=min(random.choice(range(num_main_event_least,shape[0]+1)),int(main_event["num_stations"]))
-            main_stations=random.sample(main_event["stations"],num_main_event)
+            num_main_event=min(random.choice(range(num_main_event_least,shape[0]+1)), 
+                               int(main_event["num_stations"]))
+            main_stations=random.sample(main_event["stations"], num_main_event)
             main_paths=[main_event["traces"][station] for station in main_stations]
 
 
-            sub_stations_total=[station for station in sub_event["stations"] if station not in main_event["stations"]]
-            sub_stations=random.sample(sub_stations_total,min(shape[0]-num_main_event,len(sub_stations_total)))
+            sub_stations_total=[station for station in sub_event["stations"] 
+                                if station not in main_event["stations"]]
+            sub_stations=random.sample(sub_stations_total, 
+                                       min(shape[0]-num_main_event, len(sub_stations_total)))
             num_sub_event=len(sub_stations)
 
             sub_paths=[sub_event["traces"][station] for station in sub_stations]
@@ -375,13 +389,23 @@ class PSpickerDataset(model.Dataset):
                 traces.append(trace)
 
             stream=Stream(traces=traces)
+            
+            ##
+            gaps = stream.get_gaps()
+            if len(gaps) > 0:
+                stream.print_gaps()
+                raise ValueError ("Invalid data found")
+            
             stream.detrend("constant")
             stream.filter("highpass", freq=2.0)
 
+            stream.detrend("constant")
+            std = stream.std()
             for i in range(len(stream)):
-                stream[i].data-=np.mean(stream[i].data)
-                stream[i].data/=np.std(stream[i].data)
-
+                #stream[i].data -= np.mean(stream[i].data)
+                #stream[i].data /= np.std(stream[i].data)
+                stream[i].data /= std[i]
+                
             streams.append(stream)
 
         return streams
@@ -426,7 +450,7 @@ class PSpickerDataset(model.Dataset):
     def window_reference(self, window_id):
         """Return the shapes data of the image."""
         info = self.window_info[window_id]
-        if info["source"] == "pspikcer":
+        if info["source"] == "pspicker":
             return info["station"]
         else:
             super(self.__class__).window_reference(self, window_id)
@@ -454,8 +478,20 @@ class PSpickerDataset(model.Dataset):
 
             for trace in stream:
                 if trace.stats.channel=="U":
-                    start=int(round(trace.stats.sac["a"]*100))
-                    end=int(round(trace.stats.sac["t0"]*100))
+                    # start=int(round(trace.stats.sac["a"]*100))
+                    # end=int(round(trace.stats.sac["t0"]*100))
+                    if trace.stats.sac["b"] is None:
+                        start = int(round(trace.stats.sac["a"]  / trace.stats.sac["delta"]))
+                        end   = int(round(trace.stats.sac["t0"] / trace.stats.sac["delta"]))
+                    else:
+                        if trace.stats.sac["b"] == -12345.:
+                            start = int(round(trace.stats.sac["a"]  / trace.stats.sac["delta"]))
+                            end   = int(round(trace.stats.sac["t0"] / trace.stats.sac["delta"]))
+                        else:
+                            start = int(round((trace.stats.sac["a"]  - trace.stats.sac["b"])
+                                              / trace.stats.sac["delta"]))
+                            end   = int(round((trace.stats.sac["t0"] - trace.stats.sac["b"])
+                                              / trace.stats.sac["delta"]))
                 else:
                     continue
             if stream_id in np.where(main_match)[0]:
@@ -478,7 +514,8 @@ class PSpickerDataset(model.Dataset):
                 sub_match=sub_match[random_index]
 
         if count==2:
-            match=np.concatenate((np.expand_dims(main_match,axis=0),np.expand_dims(sub_match,axis=0)),axis=0)
+            match=np.concatenate((np.expand_dims(main_match,axis=0), 
+                                  np.expand_dims(sub_match,axis=0)),axis=0)
         elif count==1:
             match=np.expand_dims(main_match,axis=0)
 
@@ -492,9 +529,19 @@ class PSpickerDataset(model.Dataset):
         identity[sub_ids]=np.expand_dims(sub_match,axis=1)
 
         station=np.zeros([shape[0],shape[0],2])
-        for i,j in itertools.product(range(shape[0]),range(shape[0])):
-            station[i,j]=[streams[j][0].stats.sac["stla"]/streams[i][0].stats.sac["stla"],streams[j][0].stats.sac["stlo"]/streams[i][0].stats.sac["stlo"]]
-
+        #for i,j in itertools.product(range(shape[0]),range(shape[0])):
+        for i, j in itertools.combinations_with_replacement(range(shape[0]),2): 
+            #station[i,j]=[streams[j][0].stats.sac["stla"]/streams[i][0].stats.sac["stla"],streams[j][0].stats.sac["stlo"]/streams[i][0].stats.sac["stlo"]]
+            dist, az, baz = gps2dist_azimuth(streams[i][0].stats.sac["stla"], 
+                                             streams[i][0].stats.sac["stlo"], 
+                                             streams[j][0].stats.sac["stla"],
+                                             streams[j][0].stats.sac["stlo"])
+            station[i, j] = [dist * 1e-3 * np.cos(np.deg2rad(az)), 
+                             dist * 1e-3 * np.sin(np.deg2rad(az))]
+            if i != j:
+                station[j, i] = [dist * 1e-3 * np.cos(np.deg2rad(baz)), 
+                                 dist * 1e-3 * np.sin(np.deg2rad(baz))]
+            
 
         return mask.astype(np.bool), class_ids.astype(np.int32),match.astype(np.int32),station.astype(np.float32),identity.astype(np.int32)
 

@@ -6,6 +6,7 @@ from pspicker import config
 import pandas as pd
 import numpy as np
 from obspy import Trace,Stream
+from obspy.geodetics.base import gps2dist_azimuth
 import matplotlib.pyplot as plt
 from obspy.core import read
 from glob import glob
@@ -51,15 +52,15 @@ parser.add_argument('--npts', type=int, default=12000,
 
 args = parser.parse_args()
 
-MULTI_MODEL_PATH = args.multi_model
-SINGLE_MODEL_PATH = args.single_model
+#MULTI_MODEL_PATH = args.multi_model
+#SINGLE_MODEL_PATH = args.single_model
 
 #TEST_DICT="/home/aab10867zc/work/aist/pspicker/metadata/pspicker_meta_test_2019-07-29.json"
 #MODEL_DIR="/home/aab10867zc/work/aist/pspicker/training_plan"
 #EVAL_DIR="/home/aab10867zc/work/aist/pspicker/evaluation/confidence_mask_sinmul_easy"
-TEST_DICT = args.test_dict
-MODEL_DIR = args.model_dir
-EVAL_DIR  = args.eval_dir
+#TEST_DICT = args.test_dict
+#MODEL_DIR = args.model_dir
+#EVAL_DIR  = args.eval_dir
 
 ## args.npts must be a multiple of 64 (2^6).
 args.npts = args.npts - np.mod(args.npts, -64)
@@ -75,18 +76,18 @@ def main():
     multi_config.display()
 
     single_model=SingleModel.MaskRCNN(mode="inference", config=single_config,
-                                      model_dir=MODEL_DIR)
+                                      model_dir=args.model_dir)
     #single_model=MultiModel.MaskRCNN(mode="inference", config=single_config,
     #                                  model_dir=MODEL_DIR)
-    single_model.load_weights(SINGLE_MODEL_PATH, by_name=True)
+    single_model.load_weights(args.single_model, by_name=True)
     print("Single station model has been loaded.")
 
     multi_model=MultiModel.MaskRCNN(mode="inference", config=multi_config,
-                                    model_dir=MODEL_DIR)
-    multi_model.load_weights(MULTI_MODEL_PATH, by_name=True)
+                                    model_dir=args.model_dir)
+    multi_model.load_weights(args.multi_model, by_name=True)
     print("Multi station model has been loaded.")
 
-    with open(TEST_DICT)as f:
+    with open(args.test_dict)as f:
         test_dict=json.load(f)
 
     dataset=PSpickerDataset()
@@ -98,7 +99,7 @@ def main():
                                             dataset, overlap_threshold=0.3)
     results = evaluation.evaluate()
 
-    evaluation.write_json(results,EVAL_DIR)
+    evaluation.write_json(results, args.eval_dir)
     return
 
 
@@ -240,9 +241,12 @@ class PSpickerDataset(MultiModel.Dataset):
             stream.filter("highpass", freq=2.0)
             dist.append(stream[0].stats.sac["dist"])
 
+            stream.detrend("constant")
+            std = stream.std()
             for i in range(len(stream)):
-                stream[i].data-=np.mean(stream[i].data)
-                stream[i].data/=np.std(stream[i].data)
+                #stream[i].data-=np.mean(stream[i].data)
+                #stream[i].data/=np.std(stream[i].data)
+                stream[i].data /= std[i]
 
             streams.append(stream)
 
@@ -313,8 +317,20 @@ class PSpickerDataset(MultiModel.Dataset):
 
             for trace in stream:
                 if trace.stats.channel=="U":
-                    start=int(round(trace.stats.sac["a"]*100))
-                    end=int(round(trace.stats.sac["t0"]*100))
+                    # start=int(round(trace.stats.sac["a"]*100))
+                    # end=int(round(trace.stats.sac["t0"]*100))
+                    if trace.stats.sac["b"] is None:
+                        start = int(round(trace.stats.sac["a"]  / trace.stats.sac["delta"]))
+                        end   = int(round(trace.stats.sac["t0"] / trace.stats.sac["delta"]))
+                    else:
+                        if trace.stats.sac["b"] == -12345.:
+                            start = int(round(trace.stats.sac["a"]  / trace.stats.sac["delta"]))
+                            end   = int(round(trace.stats.sac["t0"] / trace.stats.sac["delta"]))
+                        else:
+                            start = int(round((trace.stats.sac["a"]  - trace.stats.sac["b"])
+                                              / trace.stats.sac["delta"]))
+                            end   = int(round((trace.stats.sac["t0"] - trace.stats.sac["b"])
+                                              / trace.stats.sac["delta"]))
                 else:
                     continue
 
@@ -332,10 +348,19 @@ class PSpickerDataset(MultiModel.Dataset):
 
 
         station=np.zeros([shape[0],shape[0],2])
-        for i,j in itertools.product(range(shape[0]),range(shape[0])):
-            station[i,j]=[streams[j][0].stats.sac["stla"]/streams[i][0].stats.sac["stla"],streams[j][0].stats.sac["stlo"]/streams[i][0].stats.sac["stlo"]]
-
-
+        #for i,j in itertools.product(range(shape[0]),range(shape[0])):
+        for i, j in itertools.combinations_with_replacement(range(shape[0]),2): 
+            #station[i,j]=[streams[j][0].stats.sac["stla"]/streams[i][0].stats.sac["stla"],streams[j][0].stats.sac["stlo"]/streams[i][0].stats.sac["stlo"]]
+            dist, az, baz = gps2dist_azimuth(streams[i][0].stats.sac["stla"], 
+                                             streams[i][0].stats.sac["stlo"], 
+                                             streams[j][0].stats.sac["stla"],
+                                             streams[j][0].stats.sac["stlo"])
+            station[i,j] = [dist * 1e-3 * np.cos(np.deg2rad(az)), 
+                            dist * 1e-3 * np.sin(np.deg2rad(az))]
+            if i != j:
+                station[j, i] = [dist * 1e-3 * np.cos(np.deg2rad(baz)), 
+                                 dist * 1e-3 * np.sin(np.deg2rad(baz))]
+            
         return mask.astype(np.bool), class_ids.astype(np.int32),station.astype(np.float32)
 
 def extract_bboxes(mask):
@@ -418,6 +443,9 @@ class Evaluation_confidence_mask():
             single_r=self.single_model.detect(np.expand_dims(window, axis=1))
             r=self.multi_model.detect(np.expand_dims(window,  axis=0),
                                       np.expand_dims(station, axis=0))[0]
+            if r["rois"] is None:
+                test_results.append(r)
+                continue
             for multi_box_id,box in enumerate(r["rois"]):
                 for station_id,single_result in enumerate(single_r):
                     overlap = compute_overlap_rate(box,single_result["rois"])

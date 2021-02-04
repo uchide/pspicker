@@ -441,7 +441,8 @@ class MaskRCNN():
 
                         # Model
             inputs = [input_window, input_window_meta,
-                      input_rpn_match, input_rpn_bbox, input_gt_class_ids,input_gt_boxes, input_gt_masks,input_gt_stations]
+                      input_rpn_match, input_rpn_bbox, input_gt_class_ids, input_gt_boxes, 
+                      input_gt_masks, input_gt_stations]
 
 
 
@@ -811,10 +812,10 @@ class MaskRCNN():
         detections, _, _, mrcnn_match, mrcnn_mask, _, _, _ =\
             self.keras_model.predict([molded_windows, window_metas, anchors,stations], verbose=0)
         
-        print("detections.shape = {}".format(detections.shape))
-        print("detections[0,;,2] = {}".format(detections[0,:,2]))
-        print("mrcnn_match.shape = {}".format(mrcnn_match.shape))
-        print("mrcnn_match[0].shape = {}".format(mrcnn_match[0].shape))
+        #print("detections.shape = {}".format(detections.shape))
+        #print("detections[0,:,2] = {}".format(detections[0,:,2]))
+        #print("mrcnn_match.shape = {}".format(mrcnn_match.shape))
+        #print("mrcnn_match[0].shape = {}".format(mrcnn_match[0].shape))
         # Process detections
         results = []
         for i, window in enumerate(windows):
@@ -894,7 +895,9 @@ class MaskRCNN():
         zero_ix = np.where(detections[:, 2] == 0)[0]
         N = zero_ix[0] if zero_ix.shape[0] > 0 else detections.shape[0]
         if N == 0:
+            #return
             return None, None, None, None, None, None
+            #return np.array([[]]), np.array([]), np.array([]), [], np.array([]), np.array([])
         
         # Extract boxes, class_ids, scores, and class-specific masks
         boxes = detections[:N, :2]
@@ -904,10 +907,10 @@ class MaskRCNN():
         matches = mrcnn_match[:N,:,:]
         masks = mrcnn_mask[np.arange(N), :, :, class_ids]
         
-        print("N = {}".format(N))
-        print("np.argmax(matches, axis=2).shape = {}".
-              format(np.argmax(matches, axis=2).shape))
-        print("matches.shape = {}".format(matches.shape))
+        #print("N = {}".format(N))
+        #print("np.argmax(matches, axis=2).shape = {}".
+        #      format(np.argmax(matches, axis=2).shape))
+        #print("matches.shape = {}".format(matches.shape))
         match_ids = np.reshape(np.argmax(matches, axis=2), (matches.shape[0], -1))
         match_scores = np.reshape(np.max(matches, axis=2), (matches.shape[0], -1))
 

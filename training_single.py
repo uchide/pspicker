@@ -90,22 +90,22 @@ args = parser.parse_args()
 #TRAIN_DICT="/home/aab10867zc/work/aist/pspicker/metadata/pspicker_meta_train_2019-07-17.json"
 #VALIDATION_DICT="/home/aab10867zc/work/aist/pspicker/metadata/pspicker_meta_validation_2019-07-19.json"
 #MODEL_DIR="/home/aab10867zc/work/aist/pspicker/training_plan"
-TRAIN_DICT      = args.train_dict
-VALIDATION_DICT = args.valid_dict
-MODEL_DIR       = args.model_dir
+#TRAIN_DICT      = args.train_dict
+#VALIDATION_DICT = args.valid_dict
+#MODEL_DIR       = args.model_dir
 
 ## args.npts must be a multiple of 64 (2^6).
 args.npts = args.npts - np.mod(args.npts, -64)
 
-print("TRAIN_DICT: ", TRAIN_DICT)
-print("VALIDATION_DICT: ", VALIDATION_DICT)
-print("MODEL_DIR: ",MODEL_DIR)
+print("TRAIN_DICT     : {}".format(args.train_dict))
+print("VALIDATION_DICT: {}".format(args.valid_dict))
+print("MODEL_DIR      : {}".format(args.model_dir))
 
 def main():
 
-    with open(TRAIN_DICT)as f:
+    with open(args.train_dict) as f:
         train_dict=json.load(f)
-    with open(VALIDATION_DICT)as f:
+    with open(args.valid_dict)as f:
         validation_dict=json.load(f)
 
 
@@ -138,7 +138,7 @@ def main():
     if args.log_dir:
         log_dir=args.log_dir
     else:
-        log_dir = os.path.join(MODEL_DIR, 
+        log_dir = os.path.join(args.model_dir, 
                                "{}{:%Y%m%dT%H%M%S}".format(psconfig.NAME.lower(), now))
         os.makedirs(log_dir, exist_ok=True)
 
@@ -162,11 +162,14 @@ def main():
         ckpt_path, ckpt_epoch, ckpt_val_loss = find_best_checkpoint(stage_train_dir)
     # If there is no checkpoint in the current stage, then find it in the previous stage.
         if ckpt_path is None:
-            ckpt_path, ckpt_epoch, ckpt_val_loss = find_best_checkpoint(*previous_stage_train_dirs[-1:])
+            ckpt_path, ckpt_epoch, ckpt_val_loss = \
+            find_best_checkpoint(*previous_stage_train_dirs[-1:])
 
-        print('\n=> Start training stage {}: lr={}, train_dir={}'.format(stage, lr, stage_train_dir))
+        print('\n=> Start training stage {}: lr={:.5e}, train_dir={}'
+              .format(stage, lr, stage_train_dir))
         if ckpt_path:
-            print('=> Found a trained model: epoch={}, val_loss={}, path={}'.format(ckpt_epoch, ckpt_val_loss, ckpt_path))
+            print('=> Found a trained model: epoch={}, val_loss={}, path={}'
+                  .format(ckpt_epoch, ckpt_val_loss, ckpt_path))
         else:
             print('=> No trained model found.')
 
@@ -187,8 +190,8 @@ def main():
 class MaskRCNN_refined(model.MaskRCNN):
 
 
-    def train(self, train_generator, val_generator, learning_rate, initial_epoch,epochs,
-              custom_callbacks=None):
+    def train(self, train_generator, val_generator, learning_rate, 
+              initial_epoch, epochs, custom_callbacks=None):
         """Train the model.
         train_dataset, val_dataset: Training and validation Dataset objects.
         learning_rate: The learning rate to train with
@@ -196,7 +199,7 @@ class MaskRCNN_refined(model.MaskRCNN):
                 are considered to be done alreay, so this actually determines
                 the epochs to train in total rather than in this particaular
                 call.
-        layers: Allows selecting wich layers to train. It can be:
+        layers: Allows selecting which layers to train. It can be:
             - A regular expression to match layer names to train
             - One of these predefined values:
               heads: The RPN, classifier and mask heads of the network
@@ -223,9 +226,12 @@ class MaskRCNN_refined(model.MaskRCNN):
         # Callbacks
         callbacks = [
             keras.callbacks.TensorBoard(log_dir=self.log_dir,
-                                        histogram_freq=0, write_graph=True, write_images=False),
-            keras.callbacks.ModelCheckpoint(os.path.join(self.log_dir, "ckpt-e{epoch:03d}-l{val_loss:.4f}.h5"),
-                                            verbose=0, save_weights_only=True,save_best_only=True),
+                                        histogram_freq=0, write_graph=True, 
+                                        write_images=False),
+            keras.callbacks.ModelCheckpoint(os.path.join(self.log_dir, 
+                                                         "ckpt-e{epoch:03d}-l{val_loss:.4f}.h5"),
+                                            verbose=0, save_weights_only=True, 
+                                            save_best_only=True),
         ]
 
         # Add custom callbacks to the list
@@ -377,9 +383,12 @@ class PSpickerDataset(model.Dataset):
             stream.detrend("constant")
             stream.filter("highpass", freq=2.0)
 
+            stream.detrend("constant")
+            std = stream.std()
             for i in range(len(stream)):
-                stream[i].data-=np.mean(stream[i].data)
-                stream[i].data/=np.std(stream[i].data)
+                #stream[i].data -= np.mean(stream[i].data)
+                #stream[i].data /= np.std(stream[i].data)
+                stream[i].data /= std[i]
 
             streams.append(stream)
 
@@ -453,8 +462,20 @@ class PSpickerDataset(model.Dataset):
 
             for trace in stream:
                 if trace.stats.channel=="U":
-                    start=int(round(trace.stats.sac["a"]*100))
-                    end=int(round(trace.stats.sac["t0"]*100))
+                    # start=int(round(trace.stats.sac["a"]*100))
+                    # end=int(round(trace.stats.sac["t0"]*100))
+                    if trace.stats.sac["b"] is None:
+                        start = int(round(trace.stats.sac["a"]  / trace.stats.sac["delta"]))
+                        end   = int(round(trace.stats.sac["t0"] / trace.stats.sac["delta"]))
+                    else:
+                        if trace.stats.sac["b"] == -12345.:
+                            start = int(round(trace.stats.sac["a"]  / trace.stats.sac["delta"]))
+                            end   = int(round(trace.stats.sac["t0"] / trace.stats.sac["delta"]))
+                        else:
+                            start = int(round((trace.stats.sac["a"]  - trace.stats.sac["b"])
+                                              / trace.stats.sac["delta"]))
+                            end   = int(round((trace.stats.sac["t0"] - trace.stats.sac["b"])
+                                              / trace.stats.sac["delta"]))
                 else:
                     continue
             if stream_id in np.where(main_match)[0]:
